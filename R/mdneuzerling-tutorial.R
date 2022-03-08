@@ -1,4 +1,4 @@
-# learning mlflow following this: 
+# learning mlflow following this:
 
 # https://mdneuzerling.com/post/tracking-tidymodels-with-mlflow/
 # initial steps are her: https://mdneuzerling.com/post/machine-learning-pipelines-with-tidymodels-and-targets/
@@ -27,7 +27,7 @@ coffee_test <- testing(coffee_split)
 
 # define recipe
 coffee_recipe <- recipe(coffee_train) %>%
-  update_role(everything(), new_role = "support") %>% 
+  update_role(everything(), new_role = "support") %>%
   update_role(cupper_points, new_role = "outcome") %>%
   update_role(
     variety, processing_method, country_of_origin,
@@ -49,7 +49,7 @@ coffee_recipe <- recipe(coffee_train) %>%
   step_unknown(variety, processing_method, new_level = "Unknown") %>%
   step_other(country_of_origin, threshold = 0.01) %>%
   step_other(processing_method, threshold = 0.10) %>%
-  step_other(variety, threshold = 0.10) %>% 
+  step_other(variety, threshold = 0.10) %>%
   step_normalize(all_numeric(), -all_outcomes())
 
 # define model and engine
@@ -71,7 +71,7 @@ coffee_grid_results <- coffee_workflow %>%
   tune_grid(resamples <- vfold_cv(coffee_train, v = 5), grid = coffee_grid)
 
 # extract parameters
-hyperparameters <- coffee_grid_results %>% 
+hyperparameters <- coffee_grid_results %>%
   select_by_pct_loss(metric = "rmse", limit = 5, trees)
 
 
@@ -109,7 +109,7 @@ log_workflow_parameters <- function(workflow) {
 log_metrics <- function(metrics, estimator = "standard") {
   metrics %>% filter(.estimator == estimator) %>% pmap(
     function(.metric, .estimator, .estimate) {
-      mlflow_log_metric(.metric, .estimate)  
+      mlflow_log_metric(.metric, .estimate)
     }
   )
   metrics
@@ -133,8 +133,27 @@ crated_model <- carrier::crate(
 
 ## set experiment ====
 # set my experiment as coffee. I only need to do this once per session:
-  
+
   mlflow_set_experiment(experiment_name = "coffee")
 
-reticulate::miniconda_path()
 
+
+
+with(mlflow_start_run(nested = TRUE), {
+  fitted_coffee_model <- coffee_workflow %>%
+    finalize_workflow(hyperparameters) %>%
+    log_workflow_parameters() %>%
+    fit(coffee_train)
+  metrics <- fitted_coffee_model %>%
+    predict(coffee_test) %>%
+    metric_set(rmse, mae, rsq)(coffee_test$cupper_points, .pred) %>%
+    log_metrics()
+  crated_model <- carrier::crate(
+    function(x) workflows:::predict.workflow(fitted_coffee_model, x),
+    fitted_coffee_model = fitted_coffee_model
+  )
+  mlflow_save_model(crated_model, here::here("models"))
+  mlflow_log_artifact(here::here("models", "crate.bin"))
+})
+
+fs::dir_tree("mlruns/1/")
